@@ -1,0 +1,13 @@
+.bin/
+*.exe
+.env
+.env.local
+data/
+.DS_Store
+.claude/
+docs/guides/
+ml/.venv/
+ml/data/
+ml/models/
+ml/mlruns/
+**/__pycache__/
