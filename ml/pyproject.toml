@@ -1,0 +1,40 @@
+[project]
+name = "nexus-ml"
+version = "0.2.0"
+description = "Nexus City ML: dataset generation, training, evaluation and inference services"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy>=2.1",
+  "pandas>=2.2",
+  "pyarrow>=17",
+  "scikit-learn>=1.6",
+  # Same library and version: on Linux the CPU-only build, which skips the
+  # ~200 MB of NVIDIA NCCL that the GPU build pulls in (nothing here uses a GPU).
+  "xgboost>=3.0; sys_platform != 'linux'",
+  "xgboost-cpu>=3.0; sys_platform == 'linux'",
+  "networkx>=3.4",
+  "fastapi>=0.115",
+  "uvicorn>=0.32",
+  "redis>=5.2",
+  "pydantic>=2.9",
+  "prometheus-client>=0.21",
+]
+
+[project.optional-dependencies]
+tracking = ["mlflow-skinny>=3.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "httpx>=0.28", "fakeredis>=2.26"]
+
+[project.scripts]
+nexus-ml = "nexus_ml.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexus_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
