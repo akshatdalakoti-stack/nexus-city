@@ -1,0 +1,181 @@
+# Docker Compose mode: the full system, no Kubernetes required.
+#   copy .env.example .env      (then set POSTGRES_PASSWORD)
+#   docker compose up --build
+# Then open http://localhost:3000
+name: nexus-city
+
+x-ml: &ml
+  # Built once (by ml-traffic) and reused by the other model services.
+  image: nexus-city/ml:dev
+  pull_policy: never
+  environment:
+    REDIS_URL: redis://redis:6379/0
+    NEXUS_MODELS_DIR: /models
+  # Trained artifacts from `nexus-ml train all` (see ml/README.md). Without
+  # them each service runs and reports "not trained" instead of predicting.
+  volumes: ["./ml/models:/models:ro"]
+  depends_on:
+    sim: { condition: service_healthy }
+  mem_limit: 512m
+  restart: unless-stopped
+
+x-go-health: &go-health
+  interval: 10s
+  timeout: 3s
+  retries: 3
+  start_period: 10s
+
+# The password is never written here; Compose refuses to start without it.
+x-database-url: &database-url "postgres://nexus:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@postgres:5432/nexus"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    # Streams are capped by the services, so no persistence or eviction is needed.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    mem_limit: 320m
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:17-3.5-alpine
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_DB: nexus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "nexus", "-d", "nexus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    restart: unless-stopped
+
+  sim:
+    build: { context: ./core, args: { SERVICE: sim } }
+    image: nexus-city/sim:dev
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SIM_SEED: ${SIM_SEED:-42}
+      SIM_SPEED: ${SIM_SPEED:-10}
+      SIM_START_PAUSED: ${SIM_START_PAUSED:-false}
+      SIM_RESUME: ${SIM_RESUME:-true}
+      SIM_HEALTH_ADDR: ":8081"
+      GOMEMLIMIT: 200MiB
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck: { test: ["CMD", "/app", "healthcheck"], <<: *go-health }
+    mem_limit: 256m
+    cpus: 1.0
+    restart: unless-stopped
+
+  gateway:
+    build: { context: ./core, args: { SERVICE: gateway } }
+    image: nexus-city/gateway:dev
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: *database-url
+      GATEWAY_ADDR: ":8080"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      GATEWAY_HISTORY_LIMIT: ${GATEWAY_HISTORY_LIMIT:-1440}
+      ASSISTANT_URL: http://assistant:8095
+      GOMEMLIMIT: 200MiB   # keep the Go GC inside the container limit
+    ports: ["${GATEWAY_PORT:-8080}:8080"]
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    healthcheck: { test: ["CMD", "/app", "healthcheck"], <<: *go-health }
+    mem_limit: 256m
+    restart: unless-stopped
+
+  # Scenario Execution Worker. Scale out with:
+  #   docker compose up -d --scale scenario-worker=3
+  scenario-worker:
+    build: { context: ./core, args: { SERVICE: scenario } }
+    image: nexus-city/scenario:dev
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: *database-url
+      MODEL_URLS: "traffic=http://ml-traffic:8090,energy=http://ml-energy:8090,pm25=http://ml-pm25:8090"
+      SCENARIO_HEALTH_ADDR: ":8082"
+      GOMEMLIMIT: 400MiB
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    healthcheck: { test: ["CMD", "/app", "healthcheck"], <<: *go-health }
+    mem_limit: 512m
+    restart: unless-stopped
+
+  # Data Storage Layer writer: observations, events, forecasts, retention.
+  recorder:
+    build: { context: ./core, args: { SERVICE: recorder } }
+    image: nexus-city/recorder:dev
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: *database-url
+      RECORDER_HEALTH_ADDR: ":8083"
+      RETENTION_SIM_DAYS: ${RETENTION_SIM_DAYS:-7}
+      RETENTION_RUNS: ${RETENTION_RUNS:-3}
+      RETENTION_SCENARIOS: ${RETENTION_SCENARIOS:-200}
+      GOMEMLIMIT: 200MiB
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    healthcheck: { test: ["CMD", "/app", "healthcheck"], <<: *go-health }
+    mem_limit: 256m
+    restart: unless-stopped
+
+  # City Intelligence. With no LLM_API_KEY it answers in rule-based mode.
+  # Reached through the gateway at /api/assistant/*; not published itself.
+  assistant:
+    build: ./assistant
+    image: nexus-city/assistant:dev
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-}
+      ASSISTANT_MODE: ${ASSISTANT_MODE:-}
+    depends_on:
+      gateway: { condition: service_healthy }
+    mem_limit: 192m
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      args: { NEXT_PUBLIC_GATEWAY_URL: "${NEXT_PUBLIC_GATEWAY_URL:-http://localhost:8080}" }
+    image: nexus-city/web:dev
+    ports: ["${WEB_PORT:-3000}:3000"]
+    depends_on:
+      gateway: { condition: service_healthy }
+    mem_limit: 384m
+    restart: unless-stopped
+
+  # One inference container per model (same image, different --models).
+  ml-traffic:
+    <<: *ml
+    build: ./ml
+    pull_policy: build
+    command: ["nexus-ml", "serve", "--models", "traffic", "--port", "8090"]
+  ml-energy:
+    <<: *ml
+    command: ["nexus-ml", "serve", "--models", "energy", "--port", "8090"]
+  ml-pm25:
+    <<: *ml
+    command: ["nexus-ml", "serve", "--models", "pm25", "--port", "8090"]
+  ml-anomaly:
+    <<: *ml
+    command: ["nexus-ml", "serve", "--models", "anomaly", "--port", "8090"]
+
+volumes:
+  pgdata:
