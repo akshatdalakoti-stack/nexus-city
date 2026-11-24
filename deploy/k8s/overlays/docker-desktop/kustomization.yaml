@@ -1,0 +1,31 @@
+# Docker Desktop's Kubernetes: images come from the local Docker image store
+# (built by ../../build-images.ps1), and LoadBalancer services are published
+# on localhost:
+#   web      http://localhost:3000
+#   gateway  http://localhost:8080   (the web app's NEXT_PUBLIC_GATEWAY_URL)
+#   grafana  http://localhost:3001
+# Stop any local dev servers on those ports first.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - ../../monitoring
+patches:
+  # Never pull the project's images from a registry: they only exist locally.
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/name in (sim,gateway,scenario-worker,recorder,ml,assistant,web)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+  - target: { kind: Service, name: web }
+    patch: |-
+      - { op: replace, path: /spec/type, value: LoadBalancer }
+  - target: { kind: Service, name: gateway }
+    patch: |-
+      - { op: replace, path: /spec/type, value: LoadBalancer }
+  - target: { kind: Service, name: grafana }
+    patch: |-
+      - { op: replace, path: /spec/type, value: LoadBalancer }
+      - { op: replace, path: /spec/ports/0/port, value: 3001 }
