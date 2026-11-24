@@ -1,0 +1,17 @@
+# Prometheus + Grafana for the nexus namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nexus
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: nexus-city
+    includeSelectors: false
+resources:
+  - prometheus.yaml
+  - grafana.yaml
+configMapGenerator:
+  # Regenerate the JSON with: python dashboards/make_dashboard.py
+  - name: grafana-dashboards
+    files: [dashboards/nexus-city.json]
+    options:
+      labels: { app.kubernetes.io/name: grafana }
