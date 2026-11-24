@@ -1,0 +1,22 @@
+# Non-secret settings shared by the services. Secrets live in the
+# `nexus-secrets` Secret, which is created outside these manifests.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexus-config
+data:
+  REDIS_URL: redis://redis:6379/0
+  SIM_SEED: "42"
+  SIM_SPEED: "10"
+  SIM_START_PAUSED: "false"
+  SIM_RESUME: "true"
+  ALLOWED_ORIGINS: http://localhost:3000
+  GATEWAY_HISTORY_LIMIT: "1440"
+  MODEL_URLS: http://ml:8090
+  ASSISTANT_URL: http://assistant:8095
+  PROMETHEUS_URL: http://prometheus:9090
+  GRAFANA_PUBLIC_URL: http://localhost:3001
+  GATEWAY_URL: http://gateway:8080
+  RETENTION_SIM_DAYS: "7"
+  RETENTION_RUNS: "3"
+  RETENTION_SCENARIOS: "200"

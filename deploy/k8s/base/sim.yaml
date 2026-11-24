@@ -1,0 +1,39 @@
+# City Simulation Worker. Exactly one replica: it owns the shared clock.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sim
+  labels: { app.kubernetes.io/name: sim }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # never two clocks, even during a rollout
+  selector:
+    matchLabels: { app.kubernetes.io/name: sim }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: sim }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8081" }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: sim
+          image: nexus-city/sim:dev
+          envFrom: [{ configMapRef: { name: nexus-config } }]
+          env:
+            - { name: SIM_HEALTH_ADDR, value: ":8081" }
+            - { name: GOMEMLIMIT, value: 200MiB }
+          ports: [{ name: http, containerPort: 8081 }]
+          # /healthz fails if the simulation loop stalls.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 200m, memory: 64Mi }
+            limits: { cpu: "1", memory: 256Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }

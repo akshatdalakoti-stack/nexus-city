@@ -1,0 +1,27 @@
+# Nexus City on Kubernetes: the application itself.
+# Monitoring (Prometheus + Grafana) is in ../monitoring; a cluster-specific
+# overlay (../overlays/docker-desktop) combines both.
+#
+# Secrets are not in these files. Create them first (deploy.ps1 does this
+# from your .env):
+#   kubectl -n nexus create secret generic nexus-secrets \
+#     --from-literal=POSTGRES_PASSWORD=<choose> --from-literal=LLM_API_KEY=<optional>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nexus
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: nexus-city
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - config.yaml
+  - redis.yaml
+  - postgres.yaml
+  - sim.yaml
+  - gateway.yaml
+  - scenario-worker.yaml
+  - recorder.yaml
+  - ml.yaml
+  - assistant.yaml
+  - web.yaml

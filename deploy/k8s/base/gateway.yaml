@@ -1,0 +1,94 @@
+# API Gateway. It also reads this namespace's workloads, pods and autoscalers
+# (read-only) for the Infrastructure page.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/name: gateway }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-infra-reader
+  labels: { app.kubernetes.io/name: gateway }
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+  - apiGroups: [keda.sh]
+    resources: [scaledobjects]
+    verbs: [get, list]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-infra-reader
+  labels: { app.kubernetes.io/name: gateway }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: gateway-infra-reader }
+subjects: [{ kind: ServiceAccount, name: gateway }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/name: gateway }
+spec:
+  # One replica: live history is held in memory. WebSocket fan-out could
+  # run on more, but each would hold its own copy of the history.
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: gateway }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080" }
+    spec:
+      serviceAccountName: gateway
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: gateway
+          image: nexus-city/gateway:dev
+          envFrom: [{ configMapRef: { name: nexus-config } }]
+          env:
+            - { name: GATEWAY_ADDR, value: ":8080" }
+            - { name: GOMEMLIMIT, value: 200MiB }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: nexus-secrets, key: POSTGRES_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://nexus:$(POSTGRES_PASSWORD)@postgres:5432/nexus?sslmode=disable" }
+          ports: [{ name: http, containerPort: 8080 }]
+          # Waits for PostgreSQL before serving health checks; on a fresh
+          # cluster its first start takes ~30 s, so give it up to 3 minutes.
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          # Ready once Redis is reachable and the streams are being consumed.
+          readinessProbe:
+            httpGet: { path: /api/ready, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 96Mi }
+            limits: { cpu: "1", memory: 256Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/name: gateway }
+spec:
+  selector: { app.kubernetes.io/name: gateway }
+  ports: [{ name: http, port: 8080, targetPort: http }]
