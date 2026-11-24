@@ -1,0 +1,1 @@
+{"schema": "nexus.clock/v1", "run_id": "42-20261120T125945.354", "seed": 42, "tick": 11134, "sim_time": "2026-06-01T08:35:34Z", "emitted_at": "2026-11-20T13:03:04.8014804Z", "payload": {"run_id": "42-20261120T125945.354", "seed": 42, "epoch": "2026-06-01T05:30:00Z", "sim_time": "2026-06-01T08:35:34Z", "tick": 11134, "speed": 60, "paused": true}}
