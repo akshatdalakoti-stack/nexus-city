@@ -1,0 +1,87 @@
+# Scenario Execution Workers. KEDA owns the replica count (see the
+# ScaledObject below), so `replicas` is deliberately not set here: a later
+# `kubectl apply` must not reset what KEDA chose.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scenario-worker
+  labels: { app.kubernetes.io/name: scenario-worker }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: scenario-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: scenario-worker }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8082" }
+    spec:
+      automountServiceAccountToken: false
+      # A worker finishes the scenario it is running before it exits
+      # (a two-hour scenario takes seconds; the assistant waits up to 90 s).
+      terminationGracePeriodSeconds: 120
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: worker
+          image: nexus-city/scenario:dev
+          envFrom: [{ configMapRef: { name: nexus-config } }]
+          env:
+            - { name: SCENARIO_HEALTH_ADDR, value: ":8082" }
+            - { name: GOMEMLIMIT, value: 400MiB }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: nexus-secrets, key: POSTGRES_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://nexus:$(POSTGRES_PASSWORD)@postgres:5432/nexus?sslmode=disable" }
+          ports: [{ name: http, containerPort: 8082 }]
+          # Waits for PostgreSQL before serving health checks; on a fresh
+          # cluster its first start takes ~30 s, so give it up to 3 minutes.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+# KEDA scales the workers on the scenario queue in Redis:
+# - lagCount: scenarios queued but not yet picked up, one replica per waiting scenario;
+# - pendingEntriesCount: scenarios being run, so busy workers are never scaled to zero.
+# Zero replicas when the queue is empty; up to 3 on a burst.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: scenario-worker
+  labels: { app.kubernetes.io/name: scenario-worker }
+spec:
+  scaleTargetRef: { name: scenario-worker }
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  pollingInterval: 5
+  cooldownPeriod: 60
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 60
+          policies: [{ type: Pods, value: 1, periodSeconds: 30 }]
+  triggers:
+    - type: redis-streams
+      name: waiting
+      metadata:
+        address: redis.nexus.svc.cluster.local:6379
+        stream: "nexus:scenarios"
+        consumerGroup: scenario-workers
+        lagCount: "1"
+        activationLagCount: "0"
+    - type: redis-streams
+      name: in-flight
+      metadata:
+        address: redis.nexus.svc.cluster.local:6379
+        stream: "nexus:scenarios"
+        consumerGroup: scenario-workers
+        pendingEntriesCount: "1"

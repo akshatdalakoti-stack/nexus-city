@@ -1,0 +1,56 @@
+# Model inference: one pod serves all four models to keep memory low
+# (Compose runs one container per model). The image includes the trained
+# artifacts; build it with deploy/k8s/build-images.ps1.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml
+  labels: { app.kubernetes.io/name: ml }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: ml }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ml }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8090" }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: ml
+          image: nexus-city/ml-models:dev
+          args: ["nexus-ml", "serve", "--models", "traffic,energy,pm25,anomaly", "--port", "8090"]
+          env:
+            - name: REDIS_URL
+              valueFrom: { configMapKeyRef: { name: nexus-config, key: REDIS_URL } }
+            - { name: NEXUS_MODELS_DIR, value: /models }
+          ports: [{ name: http, containerPort: 8090 }]
+          # Loading four models takes a few seconds.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 15
+            failureThreshold: 3
+          # Ready once the models are loaded and telemetry is being followed.
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 384Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml
+  labels: { app.kubernetes.io/name: ml }
+spec:
+  selector: { app.kubernetes.io/name: ml }
+  ports: [{ name: http, port: 8090, targetPort: http }]
