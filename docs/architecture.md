@@ -9,7 +9,7 @@ traces back to a simulation step. Nothing is generated in the UI, and nothing is
 
 | Concern | Choice | Why |
 |---|---|---|
-| Simulation | **Go** (`core/internal/sim`) | Tight tick loop over ~1–2k vehicle agents plus a 972-cell pollution field; ~20k simulated seconds per wall second on one core. Deterministic by construction. |
+| Simulation | **Go** (`core/internal/sim`) | Tight tick loop over ~1–2k vehicle agents plus a 972-cell pollution field; ~26–29k simulated seconds per wall second on a laptop CPU ([benchmarks](benchmarks.md)). Deterministic by construction. |
 | Realtime edge | **Go** gateway (`core/internal/gateway`) | WebSocket fan-out and Redis Streams consumption in one small binary. |
 | ML | **Python** (`ml/`, Phase 2) | XGBoost, scikit-learn, FastAPI, MLflow. |
 | Assistant | **Python** (`assistant/`, Phase 4) | FastAPI, the OpenAI SDK against any OpenAI-compatible endpoint (Gemini by default), and a deterministic rule-based mode. A pure client of the gateway's REST API. |
@@ -23,7 +23,7 @@ same envelope (`schema`, `run_id`, `seed`, `tick`, `sim_time`, `emitted_at`, `pa
 service can line up data from different streams by `(run_id, tick)`.
 
 **Branching.** A what-if scenario rebuilds the city at any moment of a run by re-simulating
-from the seed, which takes about a second per simulated day. It then clones the engine into a
+from the seed, which takes about 3 seconds per simulated day on a laptop CPU. It then clones the engine into a
 baseline branch and a scenario branch, so both start from the identical state. The same property lets a
 restarted simulation worker resume its run instead of starting over.
 

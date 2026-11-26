@@ -155,14 +155,24 @@ docs/        Architecture and demo script
 Models train only on cities other than the live one, use embargoed chronological splits and are
 also tested on a held-out city. Tests guard against look-ahead leakage and train/serve skew.
 
-| Model | Target | Test MAE vs best baseline |
-|---|---|---|
-| Traffic (XGBoost) | Road congestion at +15/30/60 min | −11 / −12 / −16% vs ridge |
-| Energy (XGBoost) | District demand at +1…24 h | −53% (1 h) … −38% (24 h) vs seasonal naive |
-| PM2.5 (XGBoost) | Station PM2.5 at +30/60 min | −35 / −49% vs persistence |
-| Anomaly (Isolation Forest) | Incidents, surges, faulty sensors, emission releases | Shown as a second opinion; rules stay primary |
+## Benchmarks
 
-More in [ml/README.md](ml/README.md) and `ml/reports/`.
+Measured on a laptop (Ryzen 7 7445HS, 15 GB RAM). Full tables, dates and conditions are in
+[docs/benchmarks.md](docs/benchmarks.md).
+
+| What | Result | The honest part |
+|---|---|---|
+| Traffic forecast (XGBoost) | MAE 0.043–0.046 at +15/30/60 min | Only **10–16%** better than a plain ridge regression; rush-hour error is ~3× higher |
+| Energy forecast (XGBoost) | 38–53% lower MAE than a 7-day seasonal baseline | The simulator's demand curve is smoother than a real grid's |
+| PM2.5 forecast (XGBoost) | 35–49% lower MAE than persistence | Persistence is a weak baseline; error rises 30–42% on an unseen city |
+| Anomaly detection (Isolation Forest) | F1 0.12–0.48 | **Loses to simple rules** or ties in every domain, so rules stay primary |
+| Simulation speed | ~25,000–29,000 simulated seconds per second | Same final state hash on every repeat run |
+| What-if scenario (2 h) | 1.5–3 s | When branching early in a run; each simulated day of replay adds ~3 s |
+| Autoscaling (12-scenario burst) | 0 → 3 workers in 34 s, back to 0 in ~2 min | Single-node Docker Desktop cluster |
+| Tests | Go 50 passed (5 skipped), ML 21 passed, assistant 25 passed | Skipped tests need PostGIS; no CI; no web tests |
+
+All model scores come from the project's own simulator, so they show how well the models learned
+the simulator, not real-world skill. More in [ml/README.md](ml/README.md) and `ml/reports/`.
 
 ## Tests
 
@@ -208,11 +218,47 @@ written into the code or manifests.
 
 ## Limitations
 
-- The simulation models are simple and synthetic.
-- ML scores measure how well the models learned the simulator, not real-world skill.
-- Scenario outcomes are the model's response to a change, not real-world evidence.
-- Scenarios work within the first 7 simulated days of a run.
-- City Intelligence reports what the data shows, not why.
+This is a portfolio project, not a production system. What it does **not** do:
 
-The full list is in
+**Data and models**
+- **All data is synthetic.** No real city, sensor or grid data is used, and nothing was validated
+  against reality.
+- **Circular evaluation.** The models are trained and tested on the same simulator, so good scores
+  partly reflect how simple the simulator is.
+- **Weak spots:**
+  - the anomaly detector does not beat simple rules;
+  - the traffic model is only modestly better than linear regression;
+  - the energy model has no weather forecast input.
+- **Simple physics.** The PM2.5 model is a toy dispersion model, not an air-quality model.
+- **Simple traffic.** Each vehicle agent stands for 8 cars. Roads are straight segments with no
+  turn lanes. Drivers reroute only around closed roads, not around jams.
+
+**Scenarios and assistant**
+- **Model responses, not evidence.** Scenario results show how the simulator reacts to a change.
+  The forecasts inside them come from models that never saw a closed road or adaptive signals.
+- **7-day cap.** Scenarios can only branch within the first 7 simulated days of a run, because they
+  replay from the seed and there are no checkpoints.
+- **Assistant answers are slow and limited.** City Intelligence takes 10–30 s per answer and reports
+  what the data shows, not causes. Its grounding check catches invented numbers, but not wrong
+  reasoning.
+
+**Engineering**
+- **No authentication or rate limiting.** Anyone who can reach the gateway can pause or reset the
+  city, queue scenarios and use the assistant. It is not safe to expose to the internet as it is.
+- **No high availability.**
+  - The simulation and gateway run as single instances, and the gateway keeps its history in
+    memory.
+  - Redis and Prometheus don't persist data.
+  - The Kubernetes setup is one local node.
+- **Not deployed publicly.** It runs on Docker Compose or local Docker Desktop Kubernetes, and the
+  deploy scripts are PowerShell, tested only on Windows.
+- **Testing gaps.**
+  - There is no CI.
+  - The database tests need a PostGIS instance and are skipped by default.
+  - The web app has no automated tests.
+  - There has been no load test with many users.
+- **Accessibility.** Checked with scripts and by hand, not with screen-reader users. The map itself
+  has no text equivalent beyond the inspector and the lists.
+
+More detail is in
 [docs/architecture.md § 12](docs/architecture.md#12-assumptions-and-limitations).
