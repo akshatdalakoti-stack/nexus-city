@@ -31,7 +31,7 @@ A short walkthrough of every feature:
 
 Waiting periods are sped up 8× and labelled on screen.
 
-https://github.com/user-attachments/assets/719984bb-2df3-4fa7-be55-318cd2b36a83
+https://github.com/user-attachments/assets/906e56cf-4243-4b6c-b3a4-f6cf3bef87f3
 
 ## Features
 
