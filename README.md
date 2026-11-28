@@ -29,9 +29,9 @@ A short walkthrough of every feature:
 - City Intelligence;
 - Kubernetes autoscaling.
 
-[![Nexus City demo: click for the full video](docs/media/demo-preview.gif)](docs/media/nexus-city-demo.mp4)
+![Nexus City demo preview](docs/media/demo-preview.gif)
 
-The preview above runs at 4× speed. **[Watch the full 1 min 38 s video](docs/media/nexus-city-demo.mp4)**.
+The preview above runs at 4× speed. **[Download the full 1 min 38 s video (MP4, 5.6 MB)](https://github.com/akshatdalakoti-stack/nexus-city/raw/main/docs/media/nexus-city-demo.mp4)**.
 In the full video, waiting periods are sped up 8× and labelled on screen.
 
 ## Features
