@@ -20,6 +20,20 @@ A live digital twin of **Nexus City**, a fictional city of ~360,000 people.
 > measurement of a real city. Model scores show how well a model learned the simulator, not
 > real-world forecasting skill.
 
+## Demo Video
+
+A short walkthrough of every feature:
+- the live city and the digital twin map;
+- AI forecasts and the model benchmarks;
+- a what-if road closure;
+- City Intelligence;
+- Kubernetes autoscaling.
+
+[![Nexus City demo: click for the full video](docs/media/demo-preview.gif)](docs/media/nexus-city-demo.mp4)
+
+The preview above runs at 4× speed. **[Watch the full 1 min 38 s video](docs/media/nexus-city-demo.mp4)**.
+In the full video, waiting periods are sped up 8× and labelled on screen.
+
 ## Features
 
 | Page | What it does |
